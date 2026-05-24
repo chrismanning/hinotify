@@ -3,6 +3,7 @@ module Utils where
 
 import Control.Concurrent.Chan
 import Control.Exception
+import System.Timeout
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC8
@@ -45,13 +46,26 @@ inTestEnviron events action f =
         chan <- newChan
         withWatch inot events testPath (writeChan chan) $ do
             _ <- action (fromString . BC8.unpack $ testPath)
-            events' <- getChanContents chan
+            events' <- collectEvents chan
             f events'
 
 (~=) :: Eq a => [a] -> [a] -> Bool
 [] ~= _ = True
-(x:xs) ~= (y:ys) = x == y && xs ~= ys
+(x:xs) ~= (y:ys)
+    | x == y = xs ~= ys
+    | otherwise = (x:xs) ~= ys
 _ ~= _ = False
+
+collectEvents :: Chan a -> IO [a]
+collectEvents chan = go []
+  where
+    quietPeriodUs = 100000
+
+    go acc = do
+        event <- timeout quietPeriodUs (readChan chan)
+        case event of
+            Nothing -> return (reverse acc)
+            Just x -> go (x:acc)
 
 asMany :: [a] -> [a] -> [a]
 asMany xs ys = take (length xs) ys
@@ -66,4 +80,3 @@ explainFailure expected reality = unlines $
 testFailure, testSuccess :: IO a
 testFailure = exitFailure 
 testSuccess = exitSuccess
-
